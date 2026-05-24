@@ -137,19 +137,51 @@ def create_assessment_pdf(subject, topic, difficulty, questions):
 
     elements.append(HRFlowable(width="100%", thickness=1.5, color=PRIMARY, spaceAfter=10))
 
-    elements.append(Paragraph("<b>SECTION A - MULTIPLE CHOICE QUESTIONS</b>", styles["SectionHeader"]))
+    type_labels = {
+        "mcq": "Multiple Choice Questions",
+        "true_false": "True/False Questions",
+        "fill_blanks": "Fill in the Blanks",
+        "short_answer": "Short Answer Questions",
+        "match_following": "Match the Following"
+    }
+
+    types_present = set(q.get("type", "mcq") for q in questions)
+    section_label = " & ".join(type_labels.get(t, t.capitalize()) for t in sorted(types_present))
+    elements.append(Paragraph(f"<b>SECTION A — {section_label}</b>", styles["SectionHeader"]))
     elements.append(Spacer(1, 4))
 
     for i, q in enumerate(questions, 1):
-        q_bg_color = HexColor("#f9f9ff") if i % 2 == 0 else white
+        q_type = q.get("type", "mcq")
 
         question_text = f'<b>Q{i}.</b>  {q["question"]}'
         elements.append(Paragraph(question_text, styles["QuestionText"]))
 
-        opt_labels = ["A", "B", "C", "D"]
-        for label in opt_labels:
-            opt_text = q["options"].get(label, "")
-            elements.append(Paragraph(f'<b>({label})</b>  {opt_text}', styles["OptionText"]))
+        if q_type == "mcq":
+            opt_labels = ["A", "B", "C", "D"]
+            for label in opt_labels:
+                opt_text = q["options"].get(label, "")
+                elements.append(Paragraph(f'<b>({label})</b>  {opt_text}', styles["OptionText"]))
+
+        elif q_type == "true_false":
+            for label in ["True", "False"]:
+                opt_text = q.get("options", {}).get(label, label)
+                elements.append(Paragraph(f'<b>({label})</b>  {opt_text}', styles["OptionText"]))
+
+        elif q_type == "fill_blanks":
+            elements.append(Spacer(1, 2))
+            elements.append(Paragraph('<i>(Fill in the blank)</i>', styles["OptionText"]))
+
+        elif q_type == "short_answer":
+            elements.append(Spacer(1, 2))
+            elements.append(Paragraph('<i>(Short answer question)</i>', styles["OptionText"]))
+
+        elif q_type == "match_following":
+            pairs = q.get("pairs", {})
+            elements.append(Spacer(1, 2))
+            elements.append(Paragraph('<i>Match Column A with Column B:</i>', styles["OptionText"]))
+            elements.append(Spacer(1, 2))
+            for left, right in pairs.items():
+                elements.append(Paragraph(f'&nbsp;&nbsp;{left} &mdash; {right}', styles["OptionText"]))
 
         elements.append(Spacer(1, 2))
         hr = HRFlowable(width="60%", thickness=0.5, color=HexColor("#eeeeee"), spaceAfter=6, spaceBefore=2)
@@ -160,13 +192,34 @@ def create_assessment_pdf(subject, topic, difficulty, questions):
     elements.append(Spacer(1, 6))
 
     for i, q in enumerate(questions, 1):
-        ans = q["correct_answer"]
-        ans_text = q["options"].get(ans, "")
+        q_type = q.get("type", "mcq")
+        ans = q.get("correct_answer", "")
         explanation = q.get("explanation", "No explanation provided.")
+
+        if q_type == "mcq":
+            ans_text = q.get("options", {}).get(ans, "")
+            answer_label = f'<b>Answer: {ans}) {ans_text}</b>'
+
+        elif q_type == "true_false":
+            answer_label = f'<b>Answer: {ans}</b>'
+
+        elif q_type == "fill_blanks":
+            answer_label = f'<b>Answer: {ans}</b>'
+
+        elif q_type == "short_answer":
+            answer_label = f'<b>Expected Answer:</b> {ans}'
+
+        elif q_type == "match_following":
+            pairs = q.get("pairs", {})
+            pair_str = "; ".join([f"{k} → {v}" for k, v in pairs.items()])
+            answer_label = f'<b>Correct Matches:</b> {pair_str}'
+
+        else:
+            answer_label = f'<b>Answer: {ans}</b>'
 
         answer_block = [
             [Paragraph(f'<b>Q{i}.</b>', styles["AnswerBox"]),
-             Paragraph(f'<b>Answer: {ans}) {ans_text}</b>', styles["AnswerBox"])]
+             Paragraph(answer_label, styles["AnswerBox"])]
         ]
         ans_table = Table(answer_block, colWidths=[30, 430])
         ans_table.setStyle(TableStyle([

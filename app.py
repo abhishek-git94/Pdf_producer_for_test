@@ -1,6 +1,7 @@
 import streamlit as st
 from groq_api import init_groq, generate_mcqs
 from pdf_generator import create_assessment_pdf
+from pypdf import PdfReader
 
 st.set_page_config(
     page_title="Abhi Gen_AI - Assessment Generator",
@@ -104,6 +105,15 @@ CUSTOM_CSS = """
     font-size: 14px;
 }
 
+.question-card .q-type-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 12px;
+    margin-left: 8px;
+}
+
 .question-card .q-text {
     color: rgba(255, 255, 255, 0.9);
     font-size: 15px;
@@ -200,21 +210,82 @@ div.stAlert {
     border: 1px solid rgba(239, 68, 68, 0.2) !important;
 }
 
+.stCheckbox {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+
 footer { display: none; }
 #MainMenu { visibility: hidden; }
 </style>
 """
 
+def extract_pdf_text(pdf_file):
+    try:
+        reader = PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        return text.strip()
+    except Exception as e:
+        return None
+
+TYPE_BADGE_COLORS = {
+    "mcq": "#667eea",
+    "true_false": "#f59e0b",
+    "fill_blanks": "#10b981",
+    "short_answer": "#ef4444",
+    "match_following": "#8b5cf6"
+}
+
+TYPE_LABELS = {
+    "mcq": "MCQ",
+    "true_false": "True/False",
+    "fill_blanks": "Fill Blanks",
+    "short_answer": "Short Answer",
+    "match_following": "Match"
+}
+
 def render_questions(qa):
     for q in qa:
-        opt_text = " | ".join([f"{k}) {v}" for k, v in q["options"].items()])
-        div_class = "question-card"
+        q_type = q.get("type", "mcq")
+        badge_color = TYPE_BADGE_COLORS.get(q_type, "#667eea")
+        badge_label = TYPE_LABELS.get(q_type, q_type)
+
+        options_html = ""
+        if q_type == "mcq":
+            opt_text = " | ".join([f"{k}) {v}" for k, v in q.get("options", {}).items()])
+            options_html = f'<div class="option">{opt_text}</div>'
+
+        elif q_type == "true_false":
+            opts = q.get("options", {})
+            opt_text = " | ".join([f"{k}) {v}" for k, v in opts.items()])
+            options_html = f'<div class="option">{opt_text}</div>'
+
+        elif q_type == "fill_blanks":
+            options_html = '<div class="option">✏️ Fill in the blank</div>'
+
+        elif q_type == "short_answer":
+            options_html = '<div class="option">📝 Write a short answer</div>'
+
+        elif q_type == "match_following":
+            pairs = q.get("pairs", {})
+            pair_lines = "<br>".join([f"&nbsp;&nbsp;➡ {k} &nbsp;—&nbsp; {v}" for k, v in pairs.items()])
+            options_html = f'<div class="option">🔗 Match the following:<br>{pair_lines}</div>'
+
+        correct = q.get("correct_answer", "")
+        if q_type == "match_following":
+            pairs = q.get("pairs", {})
+            pair_str = " → ".join([f"{k}: {v}" for k, v in pairs.items()])
+            correct_label = f"✓ Matches: {pair_str}"
+        else:
+            correct_label = f"✓ Answer: {correct}"
+
         st.markdown(f"""
-        <div class="{div_class}">
-            <div class="q-num">Q{q["id"]}</div>
+        <div class="question-card">
+            <div class="q-num">Q{q["id"]} <span class="q-type-badge" style="background:{badge_color}22; color:{badge_color};">{badge_label}</span></div>
             <div class="q-text">{q["question"]}</div>
-            <div class="option">{opt_text}</div>
-            <span class="correct-badge">✓ Answer: {q["correct_answer"]}</span>
+            {options_html}
+            <span class="correct-badge">{correct_label}</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -236,6 +307,10 @@ def main():
         st.session_state.topic = ""
     if "difficulty" not in st.session_state:
         st.session_state.difficulty = "Mixed"
+    if "question_types" not in st.session_state:
+        st.session_state.question_types = ["mcq"]
+    if "ref_text" not in st.session_state:
+        st.session_state.ref_text = ""
 
     col1, col2 = st.columns([1, 1.3])
 
@@ -251,7 +326,6 @@ def main():
         )
 
         subject = st.text_input("Subject", placeholder="e.g., Physics, History, Data Science")
-
         topic = st.text_input("Topic", placeholder="e.g., Quantum Mechanics, WW2")
 
         difficulty = st.selectbox(
@@ -261,6 +335,45 @@ def main():
         )
 
         num_questions = st.slider("Number of Questions", min_value=3, max_value=20, value=5)
+
+        st.markdown("<p style='color:rgba(255,255,255,0.7); font-size:14px; font-weight:500; margin:16px 0 6px;'>📌 Question Types</p>", unsafe_allow_html=True)
+        q_types_selected = []
+        col_a, col_b = st.columns(2)
+        with col_a:
+            mcq_val = st.checkbox("Multiple Choice", value="mcq" in st.session_state.question_types, key="chk_mcq")
+            tf_val = st.checkbox("True/False", value="true_false" in st.session_state.question_types, key="chk_tf")
+            fib_val = st.checkbox("Fill in Blanks", value="fill_blanks" in st.session_state.question_types, key="chk_fib")
+        with col_b:
+            sa_val = st.checkbox("Short Answer", value="short_answer" in st.session_state.question_types, key="chk_sa")
+            mt_val = st.checkbox("Match Following", value="match_following" in st.session_state.question_types, key="chk_mt")
+
+        if mcq_val: q_types_selected.append("mcq")
+        if tf_val: q_types_selected.append("true_false")
+        if fib_val: q_types_selected.append("fill_blanks")
+        if sa_val: q_types_selected.append("short_answer")
+        if mt_val: q_types_selected.append("match_following")
+
+        if not q_types_selected:
+            st.warning("Select at least one question type.")
+            q_types_selected = ["mcq"]
+
+        st.markdown("<p style='color:rgba(255,255,255,0.7); font-size:14px; font-weight:500; margin:16px 0 6px;'>📄 Reference PDF (Optional)</p>", unsafe_allow_html=True)
+        uploaded_pdf = st.file_uploader("Upload a PDF for the AI to base questions on", type=["pdf"], label_visibility="collapsed")
+
+        ref_text = st.session_state.ref_text
+        if uploaded_pdf is not None:
+            if "last_pdf" not in st.session_state or st.session_state.last_pdf != uploaded_pdf.name:
+                with st.spinner("Extracting text from PDF..."):
+                    extracted = extract_pdf_text(uploaded_pdf)
+                    if extracted:
+                        ref_text = extracted
+                        st.session_state.ref_text = extracted
+                        st.session_state.last_pdf = uploaded_pdf.name
+                        st.success(f"✅ Extracted {len(extracted)} characters from PDF")
+                    else:
+                        st.error("Failed to extract text from PDF.")
+        else:
+            st.session_state.ref_text = ""
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -278,7 +391,11 @@ def main():
             else:
                 with st.spinner("Generating questions with Llama 3.1..."):
                     init_groq(api_key)
-                    result = generate_mcqs(subject, topic, difficulty, num_questions)
+                    result = generate_mcqs(
+                        subject, topic, difficulty, num_questions,
+                        question_types=q_types_selected,
+                        reference_text=st.session_state.ref_text
+                    )
 
                 if "error" in result:
                     st.error(f"❌ {result['error']}")
@@ -290,6 +407,7 @@ def main():
                     st.session_state.subject = subject
                     st.session_state.topic = topic
                     st.session_state.difficulty = difficulty
+                    st.session_state.question_types = q_types_selected
                     st.success(f"✅ {result['count']} questions generated successfully!")
 
         st.markdown("</div>", unsafe_allow_html=True)
