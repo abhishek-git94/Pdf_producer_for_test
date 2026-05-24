@@ -1,4 +1,3 @@
-import os
 import streamlit as st
 from groq_api import init_groq, generate_mcqs
 from pdf_generator import create_assessment_pdf
@@ -244,12 +243,10 @@ def main():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.markdown("<h3>⚙️ Configuration</h3>", unsafe_allow_html=True)
 
-        env_key = os.getenv("GROQ_API_KEY", "")
         api_key = st.text_input(
             "Groq API Key",
             type="password",
             placeholder="sk-...",
-            value=env_key,
             help="Enter your Groq API key from console.groq.com"
         )
 
